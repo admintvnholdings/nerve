@@ -1,0 +1,12 @@
+{
+  "name": "nerve-intake",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nerve-intake": "./cli.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
