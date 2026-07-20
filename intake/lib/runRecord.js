@@ -7,7 +7,7 @@ import pg from 'pg';
 const VALID_OUTCOMES = new Set([
   'foundation', 'artifact', 'skill', 'routine',
   'dynamic_workflow', 'agent', 'project',
-  'declined', 'deferred',
+  'declined', 'deferred', 'unrouted',
 ]);
 
 export function makePool() {
