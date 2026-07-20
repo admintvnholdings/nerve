@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# One-time M2 setup: creates the litellm database (its own virtual-key
-# store, separate from the nerve schema), brings up the litellm service,
-# and mints two virtual keys — normalizer and router — so spend is
-# attributed per component from the first call (spec Section 9).
+# Creates the litellm database (its own virtual-key store, separate from
+# the nerve schema), brings up the litellm service, and mints one virtual
+# key per component — normalizer, router (M2), artifact, skill (M3) — so
+# spend is attributed per component from the first call (spec Section 9).
 # Idempotent: safe to re-run; skips steps already done.
 set -euo pipefail
 
@@ -62,6 +62,22 @@ else
     echo "mint  router virtual key"
     key="$(mint_key router)"
     printf 'LITELLM_ROUTER_KEY=%s\n' "$key" >> .env
+fi
+
+if grep -q '^LITELLM_ARTIFACT_KEY=.\+' .env; then
+    echo "skip  artifact virtual key (already set in .env)"
+else
+    echo "mint  artifact virtual key"
+    key="$(mint_key artifact)"
+    printf 'LITELLM_ARTIFACT_KEY=%s\n' "$key" >> .env
+fi
+
+if grep -q '^LITELLM_SKILL_KEY=.\+' .env; then
+    echo "skip  skill virtual key (already set in .env)"
+else
+    echo "mint  skill virtual key"
+    key="$(mint_key skill)"
+    printf 'LITELLM_SKILL_KEY=%s\n' "$key" >> .env
 fi
 
 echo "litellm setup complete."

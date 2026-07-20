@@ -42,3 +42,53 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  temporal:
+    # auto-setup creates the temporal/temporal_visibility databases and
+    # schema itself against the existing postgres instance — no
+    # pre-creation step needed (nerve_admin has CREATEDB via POSTGRES_USER).
+    image: temporalio/auto-setup:1.29.7
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "127.0.0.1:7233:7233"
+    healthcheck:
+      # auto-setup binds the frontend to the container's bridge IP, not
+      # 127.0.0.1 — use the compose service's own DNS name instead.
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  worker:
+    # Debian-based (glibc), not alpine — @temporalio/core-bridge ships
+    # prebuilt native bindings per libc, and intake/ (with its host-
+    # installed node_modules) is bind-mounted straight into this container;
+    # sharing one node_modules across host and container requires matching
+    # libc, so no separate install step runs in here.
+    image: node:20-bookworm-slim
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      temporal:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_ARTIFACT_KEY: ${LITELLM_ARTIFACT_KEY}
+      LITELLM_SKILL_KEY: ${LITELLM_SKILL_KEY}
+    volumes:
+      - ./intake:/app
+      - ./output:/app/output
+    command: ["node", "worker.js"]
