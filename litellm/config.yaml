@@ -1,0 +1,19 @@
+# Spec Section 9 annex: three vendor-agnostic tiers, Anthropic as sole
+# provider row behind them. Model IDs verified live against the Anthropic
+# models endpoint on 2026-07-20 (see spec changelog v1.1).
+model_list:
+  - model_name: economy
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: workhorse
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: flagship
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

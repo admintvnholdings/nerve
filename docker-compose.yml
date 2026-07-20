@@ -16,5 +16,30 @@ services:
       timeout: 5s
       retries: 10
 
+  litellm:
+    # -database variant bundles the Prisma toolchain needed for its own
+    # virtual-key store (spec Section 9: "per-key spend tracking").
+    image: ghcr.io/berriai/litellm-database:v1.93.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml"]
+    healthcheck:
+      # wolfi-based image ships neither wget nor curl; the app is Python.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   nerve_pg_data:
