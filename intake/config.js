@@ -58,4 +58,20 @@ export const CONFIG = {
   // threshold for "the owner walked away," not a demo-friendly one.
   pendingTaskTtlMs: Number(process.env.PENDING_TASK_TTL_MS) || 15 * 60_000,
   pendingTaskSweepIntervalMs: Number(process.env.PENDING_TASK_SWEEP_INTERVAL_MS) || 60_000,
+
+  // M6 voice intake (spec Section 10 open decision 2, resolved: local,
+  // no egress). Model is a request param to the local speaches server,
+  // not a server-wide default, so it lives here rather than in compose.
+  sttModel: 'deepdml/faster-whisper-large-v3-turbo-ct2',
+  // ~3 minutes is the primary cap, enforced client-side (the record
+  // button auto-stops the recording at this point). The server enforces
+  // a corresponding byte-size cap as the real backstop, since duration
+  // isn't otherwise verified server-side without adding an audio-probing
+  // dependency (ffprobe) that a v0 voice feature doesn't need yet: 3min
+  // at a generous 256kbps ceiling (well above typical voice-optimized
+  // Opus, which runs 24-64kbps) is 5.76MB; doubled for container-format
+  // overhead and safety margin.
+  voiceMaxDurationSeconds: 180,
+  voiceMaxBytes: 10 * 1024 * 1024,
+  voiceAllowedMimePrefix: 'audio/',
 };

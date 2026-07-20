@@ -5,9 +5,12 @@
 // source_device is always 'web' here so the two interfaces stay
 // distinguishable in the run log.
 import path from 'node:path';
+import fs from 'node:fs';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
+import multer from 'multer';
 import { normalize } from '../lib/normalize.js';
 import { makePool, writeRunRecord } from '../lib/runRecord.js';
 import { dispatchable, dispatch } from '../dispatch.js';
@@ -20,6 +23,55 @@ const pool = makePool();
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// M6: voice is just a way to fill the textarea — this is the only new
+// endpoint. Everything downstream (normalize/pregate/router/dispatch/
+// schema) is unchanged and unaware voice exists.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: CONFIG.voiceMaxBytes },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith(CONFIG.voiceAllowedMimePrefix)) {
+      return cb(new Error(`Only audio uploads are accepted (got ${file.mimetype})`));
+    }
+    cb(null, true);
+  },
+});
+
+app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'audio file is required' });
+
+    const form = new FormData();
+    form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname || 'recording');
+    form.append('model', CONFIG.sttModel);
+
+    const sttRes = await fetch(`${process.env.STT_BASE_URL}/v1/audio/transcriptions`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!sttRes.ok) {
+      const text = await sttRes.text();
+      throw new Error(`STT service failed (${sttRes.status}): ${text}`);
+    }
+    const { text } = await sttRes.json();
+    res.json({ text });
+  } catch (err) {
+    console.error('Transcription error:', err.message);
+    const status = err.message.startsWith('Only audio uploads') ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+// multer's own file-too-large error arrives via this error-handling
+// middleware (4-arg signature), not the route handler's catch.
+app.use((err, req, res, next) => {
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      error: `Recording too large — max ${CONFIG.voiceMaxBytes} bytes (~${CONFIG.voiceMaxDurationSeconds}s)`,
+    });
+  }
+  next(err);
+});
 
 app.post('/api/tasks', async (req, res) => {
   try {
@@ -214,5 +266,25 @@ setInterval(() => {
 
 const PORT = process.env.WEB_PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Nerve web app listening on :${PORT}`);
+  console.log(`Nerve web app listening on :${PORT} (HTTP)`);
 });
+
+// M6: HTTPS is a prerequisite for microphone access (getUserMedia requires
+// a secure context; the Tailscale IP over plain HTTP doesn't qualify,
+// unlike 127.0.0.1). Cert is issued via Tailscale's own control plane
+// (tailscale cert) — no public exposure, no self-signed-cert warnings.
+// Optional: HTTP-only environments (e.g. before the cert exists) skip
+// this rather than crash.
+const CERT_PATH = process.env.TLS_CERT_PATH;
+const KEY_PATH = process.env.TLS_KEY_PATH;
+if (CERT_PATH && KEY_PATH && fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH)) {
+  const HTTPS_PORT = process.env.WEB_HTTPS_PORT || 3443;
+  https.createServer({
+    cert: fs.readFileSync(CERT_PATH),
+    key: fs.readFileSync(KEY_PATH),
+  }, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+    console.log(`Nerve web app listening on :${HTTPS_PORT} (HTTPS, mic access enabled)`);
+  });
+} else {
+  console.log('TLS_CERT_PATH/TLS_KEY_PATH not set or files missing — HTTPS disabled, no mic access.');
+}
