@@ -1,8 +1,8 @@
 # Nerve — Task Router System Specification
 
 **Inherits from:** Genesis Template v1.1 (root contract)
-**Status:** Frozen for build (v1.2)
-**Version:** 1.2
+**Status:** Frozen for build (v1.3)
+**Version:** 1.3
 
 ---
 
@@ -34,6 +34,7 @@ This document is a living artifact. Every revision appends a changelog row. Clau
 | 1.0 | 2026-07-20 | Cross-cutting requirements (8) gain a PII/secrets severity-ladder guardrail (credentials always halt, no operator override; classify up under uncertainty, never down; verdict-only, never auto-redacts). Open decision 6 (evaluator cadence) gains a candidate numeric data point (>20% false-positive or >5% miss rate as a version-bump trigger), not yet adopted. Source: AI Recon `skills/pii-detect.SKILL.md`. **AI Recon findings incorporated; frozen for build.** | Tiaan + Claude |
 | 1.1 | 2026-07-20 | M2 build: Section 9 model routing row's IDs verified live against the Anthropic models endpoint — economy = `claude-haiku-4-5-20251001`, workhorse = `claude-sonnet-5`, flagship = `claude-opus-4-8`; tier intent (economy/workhorse/flagship assignments from v0.6) unchanged, only concrete IDs corrected. Annex noted for Sonnet 5's expiring intro pricing and its heavier tokenizer, so the evaluator (7) doesn't misread the September cost step-up as drift | Tiaan + Claude |
 | 1.2 | 2026-07-20 | M2 closure: run record (6) gains a third confirmation state — `confirmed_overridden` may now be `aborted` (migration 003), for a proposed route the owner neither confirmed nor overrode. Such runs still write `run_id` + `intent` + `route` (`outcome` holds the *proposed* route; `execution`/`measures` null), so the override-rate data that calibrates silence-default, tier escalation, and confidence thresholds (7) is not survivor-biased toward only confirmed/overridden routes. Additive per Section 6's versioned-and-additive schema rule | Tiaan + Claude |
+| 1.3 | 2026-07-20 | Spec-sync sweep, M3 build: run record (6) gains `output_ref` in the execution group (migration 004) — a pointer to the produced deliverable, content itself stored outside the run log. `outcome_shipped`'s semantics are tightened: **null until a real goal-verification mechanism exists (M7)**, not judged by proxy; completion is tracked via `execution.status` instead. A small number of pre-v1.3 M3 rows recorded `outcome_shipped = true` under the earlier looser proxy ("completed without error, non-empty output") — append-only means those rows stand uncorrected, flagged in Section 6 as using the prior definition, not verified shipment. **Standing rule adopted (CLAUDE.md):** any migration touching the `runs` table requires a spec changelog row in the same commit series — schema and spec version move together, so this kind of drift doesn't recur | Tiaan + Claude |
 
 **Editing rules (binding):**
 1. Structural sections (1–8) stay vendor-agnostic. Tool names appear only in Section 9 (Implementation annex) and are marked swappable.
@@ -168,13 +169,15 @@ Every dispatched run writes exactly one record. Five field groups, mandatory fro
 run_id          unique id + timestamp + source_device
 intent          raw input (text or transcription) + normalized task statement (incl. goal) + normalizer confidence (0–1)
 route           answers given (or auto-answered, each with confidence) + overall route confidence + outcome selected (incl. declined/deferred) + confirmed/overridden/aborted flag
-execution       workflow id + version, skills invoked + versions, status (shipped / abandoned / failed), error class if failed
-measures        wall-clock duration, model cost, tokens, outcome_shipped (boolean, judged against the run's stated goal: named external recipient or owner-confirmed completion of that goal — not vague completion)
+execution       workflow id + version, skills invoked + versions, status (shipped / abandoned / failed), error class if failed, output_ref (pointer to the produced deliverable — the content itself lives outside the run log, e.g. on disk; the run record only ever stores where it is)
+measures        wall-clock duration, model cost, tokens, outcome_shipped (boolean, **null until a real goal-verification mechanism exists (M7)** — completion itself is tracked via `execution.status`; once built, judged against the run's stated goal: named external recipient or owner-confirmed completion of that goal, not vague completion)
 ```
 
 Declined/deferred runs (Section 5 pre-gate) populate `run_id`, `intent`, and `route` only — `execution` and `measures` are not applicable, since no workflow was dispatched.
 
 Aborted runs (a route was proposed but the owner neither confirmed nor overrode it) populate the same three groups — `outcome` holds the *proposed* route and `confirmed_overridden` is `aborted` — again with `execution` and `measures` null. A proposed-but-unbought route is signal, not an absence of data: it is calibration input for the evaluator (7).
+
+**Note for the evaluator (v1.3):** a small number of M3 runs (2026-07-20, before this version) recorded `outcome_shipped = true` under an earlier, looser interim definition ("workflow completed without error and produced non-empty output"), not the null-until-verified semantics above. Append-only means these rows are never corrected — treat any pre-v1.3 `outcome_shipped = true` as that looser proxy, not as a verified shipment.
 
 Rules: append-only; no record is ever edited or deleted; schema changes are versioned and additive.
 

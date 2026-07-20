@@ -18,6 +18,7 @@ You are working in the Nerve repository on tvg-ai-server. Read this file fully b
 
 ## Standing behavior rules
 
+- Any migration touching the `runs` table requires a spec changelog row in the same commit series — schema and spec version move together. (Added v1.3, after `output_ref`/migration 004 shipped without one.)
 - Milestones are gates (spec Section 11). Work only the milestone the owner names. If a task appears to need a later milestone's component, stop and report — do not pull it forward.
 - Install or add a component only in the milestone that needs it. Infrastructure ahead of need is prohibited.
 - Every schema, config, and workflow you create is a versioned artifact: meaningful git commits, one concern per commit.
