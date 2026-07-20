@@ -12,7 +12,7 @@ You are working in the Nerve repository on tvg-ai-server. Read this file fully b
 ## Environment facts
 
 - Host: tvg-ai-server, Ubuntu 24.04. Orchestration host only — never propose local LLM inference beyond sub-3B quantized models.
-- Installed: git, curl, Docker Engine + compose plugin, Node.js, Claude Code. **Nothing else.** No Postgres, no Temporal, no Redis exist yet.
+- Installed: git, curl, Docker Engine + compose plugin, Node.js, Claude Code, Tailscale (host-level, pre-existing — not something any milestone installed; the tailnet is single-identity, one owner's own devices, per M5). Postgres, Temporal, and LiteLLM now run in Docker per M1–M3.
 - All services run in Docker via a compose file in this repo. Never install services directly on the host OS.
 - Do not expose any port beyond localhost/the Tailscale interface. Nothing faces the public internet.
 
