@@ -158,14 +158,18 @@ app.get('/api/runs', async (req, res) => {
   }
 });
 
-// Same abort semantics as the CLI (M2 closure): every run is logged,
-// including the ones the owner walks away from — applied here to tasks
-// abandoned mid-flow in the web app.
+// Same "every run is logged" principle as the CLI's abort handling (M2
+// closure), applied to tasks abandoned mid-flow in the web app — but a
+// task abandoned before a route ever existed (still waiting on the
+// clarifying answer) is NOT routed to manufacture one: no LLM call, no
+// fabricated route. It's recorded as unrouted (spec v1.4) instead.
+// Removed from pendingStore only after a successful write — if the write
+// fails, the task stays pending and the next sweep retries it, rather
+// than silently vanishing.
 async function sweepStalePendingTasks() {
   const now = Date.now();
   for (const [id, task] of pendingStore.entries()) {
     if (now - task.lastActivityAt < CONFIG.pendingTaskTtlMs) continue;
-    pendingStore.remove(id);
     try {
       if (task.stage === 'route_proposed') {
         await writeRunRecord(pool, {
@@ -181,31 +185,26 @@ async function sweepStalePendingTasks() {
         });
         console.log(`Swept stale task ${id}: aborted (proposed outcome ${task.route.outcome})`);
       } else {
-        // Never got past the clarifying question — finalize with what we
-        // have, ignoring the unanswered question, the same way the CLI's
-        // own pipeline would if handed only the original input.
-        const result = await preGateThenRoute({
-          pool, id, rawInput: task.rawInput, normalized: task.normalized,
+        // Abandoned before the clarifying question was ever answered —
+        // no pre-gate, no router, no route. confirmed_overridden stays
+        // null: 'aborted' means a route was proposed (v1.2), which isn't
+        // true here.
+        await writeRunRecord(pool, {
+          id,
+          sourceDevice: SOURCE_DEVICE,
+          rawInput: task.rawInput,
+          normalizedStatement: task.normalized,
+          normalizerConfidence: task.normalized.confidence,
+          routeAnswers: { unrouted: true, reason: 'abandoned before clarifying question was answered' },
+          routeConfidence: task.normalized.confidence,
+          outcome: 'unrouted',
+          confirmedOverridden: null,
         });
-        if (result.terminal) {
-          console.log(`Swept stale task ${id}: ${result.status}`);
-        } else {
-          await writeRunRecord(pool, {
-            id,
-            sourceDevice: SOURCE_DEVICE,
-            rawInput: task.rawInput,
-            normalizedStatement: task.normalized,
-            normalizerConfidence: task.normalized.confidence,
-            routeAnswers: result.route.answers,
-            routeConfidence: result.route.overallConfidence,
-            outcome: result.route.outcome,
-            confirmedOverridden: 'aborted',
-          });
-          console.log(`Swept stale task ${id}: aborted (proposed outcome ${result.route.outcome})`);
-        }
+        console.log(`Swept stale task ${id}: unrouted (no clarifying answer)`);
       }
+      pendingStore.remove(id);
     } catch (err) {
-      console.error(`Sweep failed for pending task ${id}:`, err.message);
+      console.error(`Sweep failed for pending task ${id}, will retry next sweep:`, err.message);
     }
   }
 }
