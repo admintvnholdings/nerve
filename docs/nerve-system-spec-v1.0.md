@@ -1,8 +1,8 @@
 # Nerve — Task Router System Specification
 
 **Inherits from:** Genesis Template v1.1 (root contract)
-**Status:** Frozen for build (v1.5)
-**Version:** 1.5
+**Status:** Frozen for build (v1.6)
+**Version:** 1.6
 
 ---
 
@@ -37,6 +37,7 @@ This document is a living artifact. Every revision appends a changelog row. Clau
 | 1.3 | 2026-07-20 | Spec-sync sweep, M3 build: run record (6) gains `output_ref` in the execution group (migration 004) — a pointer to the produced deliverable, content itself stored outside the run log. `outcome_shipped`'s semantics are tightened: **null until a real goal-verification mechanism exists (M7)**, not judged by proxy; completion is tracked via `execution.status` instead. A small number of pre-v1.3 M3 rows recorded `outcome_shipped = true` under the earlier looser proxy ("completed without error, non-empty output") — append-only means those rows stand uncorrected, flagged in Section 6 as using the prior definition, not verified shipment. **Standing rule adopted (CLAUDE.md):** any migration touching the `runs` table requires a spec changelog row in the same commit series — schema and spec version move together, so this kind of drift doesn't recur | Tiaan + Claude |
 | 1.4 | 2026-07-20 | M4 closure: run record (6) `outcome` gains a tenth value — `unrouted` (migration 005) — for a task abandoned before pre-gate or the router ever ran (e.g. an unanswered clarifying question), where no route exists to record and none is fabricated. `confirmed_overridden` stays null for these rows, not `aborted` — v1.2 defines `aborted` specifically as "a route was proposed," which doesn't apply here. First Section 6 change to ship its spec row in the same commit series as its migration, per the standing rule adopted at v1.3 | Tiaan + Claude |
 | 1.5 | 2026-07-20 | M5 build: cross-cutting requirements (8) Guardrails row gains an explicit network-level trust boundary note — the app is reachable over the private mesh (Tailscale) with no app-level login, justified only because the tailnet is currently single-identity. The assumption is made structural, not silently relied on: enrolling any device or user outside the owner's identity — including employee infrastructure such as an Open WebUI rollout — makes app-level authentication mandatory before that enrollment | Tiaan + Claude |
+| 1.6 | 2026-07-20 | M6 build: voice intake. Open decision 2 (STT placement) closes — local, server-side (`faster-whisper large-v3-turbo`, CPU/int8, no egress), not on-device or hosted; escalation to a heavier local model or hosted (Groq) is a documented, owner-approved ladder, dormant until a real quality failure. Section 9's STT annex slot resolved accordingly. Section 4.3 gains an implementation note: browser mic capture needs a secure context, which M5's plain-HTTP mesh exposure doesn't provide — Section 9's Private mesh row gains the HTTPS addition (Tailscale-issued cert, second port, no public exposure) this requires | Tiaan + Claude |
 
 **Editing rules (binding):**
 1. Structural sections (1–8) stay vendor-agnostic. Tool names appear only in Section 9 (Implementation annex) and are marked swappable.
@@ -125,6 +126,7 @@ Vaults are plain-markdown knowledge bases, human-curated, living on a cloud-sync
 - Before declaring intake complete, the normalizer runs a **Simplification Pass** (Genesis Template v1.1 Rule 8): strip every requirement not strictly necessary for the task's success check.
 - If the normalizer's confidence is low, it asks **one** clarifying question, then proceeds. It never interrogates.
 - The triage router may consume the normalized statement to pre-answer its own questions; the owner sees the proposed route before dispatch (confirmation is one tap; below-threshold confidence forces explicit confirmation per Section 4.1).
+- **Implemented v1.6 (M6):** voice is a way to fill the same task-entry surface, not a parallel pipeline — the transcript lands in the same editable input a typed task would use, reviewed before submission. Browser microphone capture requires a secure context (HTTPS or `localhost`); plain-HTTP mesh access (Section 3's connectivity rule, as implemented at M5) does not qualify, so voice intake requires the HTTPS exposure noted in Section 9's annex.
 
 ---
 
@@ -229,9 +231,9 @@ Current concrete choices on the owner's stack. Any row may be replaced without c
 | Run log + retrieval | PostgreSQL; pgvector for retrieval index |
 | Fast state / messaging | Redis / NATS |
 | Object storage | MinIO |
-| Private mesh | Tailscale (PC, phone, server as peers) |
+| Private mesh | Tailscale (PC, phone, server as peers). HTTPS (v1.6, M6): served on a second port using a certificate issued through Tailscale's own control plane for the tailnet hostname — required for browser microphone access, which plain HTTP over the mesh IP doesn't qualify for. No public exposure; the plain-HTTP port (M4/M5) is unchanged for non-mic use |
 | Secrets vault | Raspberry Pi vault (planned — **blocker for agent-level outcomes**) |
-| Speech-to-text | Open slot — candidate: local Whisper-class model on PC (fits GPU constraint if small) or hosted STT; decide in plan mode |
+| Speech-to-text | **Resolved v1.6 (M6):** local, server-side — `faster-whisper large-v3-turbo` (CPU, int8) via the speaches server, no egress, no external API. Escalation ladder if quality/speed ever fails in practice: a heavier local model first; hosted (Groq) only on a *documented* quality failure with owner approval — dormant until then, not a standing fallback |
 | App delivery | Resolved v0.2: responsive web app served from the backend; native/shell wrappers are open later options |
 | Knowledge layer | Obsidian vaults on cloud-synced A: drive — roles per 3.1: **"Engine" = business-canonical** (indexed, highest authority); Genesis vault (00. Core) = contract; "Workshop" = working (research and test projects, default not indexed); "Me" = personal (ingestion-excluded); "zz_Archive" = archive (never indexed). Non-vault business sources (document warehouse, mail, files) also ingest into pgvector with provenance |
 | Task lifecycle | ClickUp holds tasks produced by Project decomposition |
@@ -241,7 +243,7 @@ Current concrete choices on the owner's stack. Any row may be replaced without c
 ## 10. Open decisions (resolve in plan mode)
 
 1. ~~App packaging~~ **Resolved v0.2:** server-hosted responsive app first; native/shell wrappers remain open later options on the same backend.
-2. STT placement: on-device (PC/phone) vs. server-side vs. hosted — privacy vs. GPU constraint trade-off.
+2. ~~STT placement~~ **Resolved v1.6:** server-side, local — `faster-whisper large-v3-turbo` (CPU, int8), no egress. Chosen over on-device (browser/phone STT support is inconsistent, especially iOS Safari) and hosted (privacy — audio never leaves the orchestration host) at the cost of CPU-bound latency on modest hardware; escalation to a heavier local model or hosted (Groq) is a documented, owner-approved ladder, not a default.
 3. ~~Auto-route confirmation~~ **Resolved v0.9:** confidence-gated (Section 4.1/4.3) — below the versioned confidence threshold, explicit owner confirmation is mandatory; at or above it, the route is eligible for silence-default confirmation. Thresholds start conservative and are versioned artifacts under the Learn loop.
 4. Recursion cap for project decomposition (recommend: depth 2 for v1).
 5. ~~Client topology~~ **Resolved v0.2:** every client talks directly to the server backend; no client is a gateway for another.

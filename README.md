@@ -2,7 +2,8 @@
 
 See `docs/nerve-system-spec-v1.0.md` and `CLAUDE.md` for the full contract.
 This file covers M1 (run record schema), M2 (intake + router CLI), M3
-(Artifact/Skill outcome dispatch via Temporal), and M4 (desktop app v0).
+(Artifact/Skill outcome dispatch via Temporal), M4 (desktop app v0), M5
+(mesh + mobile access), and M6 (voice intake).
 
 ## 1. Configure secrets
 
@@ -25,8 +26,9 @@ data on the `/data` array — not the root disk), `litellm` (bound to
 `127.0.0.1:4000`, fronting Anthropic per spec Section 9 —
 economy/workhorse/flagship tiers), `temporal` (bound to `127.0.0.1:7233`,
 schema auto-applied against the same postgres instance), `worker` (the M3
-Temporal worker — no exposed port), and `web` (the M4 desktop app v0
-backend, bound to `127.0.0.1:3000`).
+Temporal worker — no exposed port), `web` (the M4/M5/M6 backend, bound to
+`127.0.0.1:3000`, the Tailscale IP on `3000`/`3443`), and `stt` (the M6
+local speech-to-text service — no exposed port, internal only).
 
 ## 3. Apply migrations
 
@@ -255,4 +257,84 @@ page: submit a task and confirm its route. Then:
 ```
 docker compose exec postgres psql -U nerve_app -d nerve -c \
   "SELECT id, created_at, source_device, outcome, confirmed_overridden FROM runs ORDER BY created_at DESC LIMIT 5;"
+```
+
+## 11. Voice intake (M6)
+
+Voice is a way to fill the existing textarea, not a separate pipeline
+(spec Section 4.3: "same Intake as typed input"). A Record button
+next to the textarea captures audio via the browser's `MediaRecorder`,
+uploads it to a new `POST /api/transcribe` endpoint, and the returned
+transcript pre-fills the (still editable) textarea — the owner reviews
+and clicks the same existing Submit button. Everything downstream
+(`normalize`/`pregate`/`router`/`dispatch`/the schema) is unchanged and
+has no awareness voice exists. CLI untouched — no sensible microphone
+analog for an SSH-connected terminal.
+
+**STT is local, not hosted (spec Section 10 open decision 2, resolved):**
+`stt` runs `faster-whisper large-v3-turbo` (CPU, int8 quantization) via
+the [speaches](https://speaches.ai) server, internal-only — no ports
+published to the host, no external API, no egress. Escalation ladder if
+quality/speed ever becomes a real problem: try a heavier local model
+first; hosted (Groq) only on a *documented* quality failure, with owner
+approval — dormant until then, not a fallback that silently engages.
+
+**Bounds enforced server-side** (`POST /api/transcribe`): audio MIME
+types only (rejects anything not `audio/*`), and a ~10MB size cap.
+Duration itself (~3 minutes) is enforced primarily client-side (the
+Record button auto-stops at that point) — the size cap is the real
+server-side backstop, sized generously for 3 minutes at up to 256kbps
+(well above typical voice-optimized Opus, which runs 24–64kbps) with a
+2x safety margin, rather than adding an audio-probing dependency
+(`ffprobe`) a v0 voice feature doesn't need yet.
+
+**Mic access needs HTTPS — and the right URL.** Browsers only allow
+`getUserMedia` on a secure context (HTTPS, or the special-cased
+`127.0.0.1`/`localhost`). The Tailscale IP over plain HTTP (port 3000)
+does **not** qualify — that's why `web` now also serves HTTPS on 3443,
+using a certificate issued through Tailscale's own control plane (no
+public exposure, no self-signed-cert warnings):
+
+```
+https://tvg-ai-server-1.taild4a3b1.ts.net:3443
+```
+
+**Use the hostname, not the raw IP** — the certificate's subject is the
+`.ts.net` hostname, not `100.107.203.17`; connecting by IP gets a
+certificate-mismatch error (curl: `SSL: no alternative certificate
+subject name matches target host name`). MagicDNS resolves the hostname
+automatically for any device on the tailnet. Port 3000 (HTTP) still
+works exactly as before for typed tasks and run history — it just won't
+offer the mic.
+
+**Cert renewal:** Tailscale certs are short-lived (~90 days,
+Let's Encrypt-backed). `scripts/renew-tailscale-cert.sh` re-issues
+(idempotent) and restarts `web`; installed as a monthly cron job
+(`crontab -l`) so this doesn't silently expire. If it ever does anyway:
+symptom is the HTTPS port refusing TLS or serving an expired cert; fix
+is running that script by hand.
+
+**Ledger note:** transcription happens *before* a run exists — it's
+compute-only cost (no LLM tokens billed, since it's local), and never
+appears in any run's `measures.cost`/`tokens`. There's no ledger
+divergence (nothing is billed to misattribute), but the timing gap —
+STT cost is invisible to the run log entirely — is documented here
+rather than silently true.
+
+**Known limitation, not solved here:** `source_device` stays `'web'`
+for voice-originated submissions, same as typed ones — no distinct
+modality field. Same open-question treatment as M5's phone/PC
+indistinguishability (Section 10 above) — evaluator input, not solved
+now.
+
+### M6 definition of done
+
+From the iPhone, over `https://tvg-ai-server-1.taild4a3b1.ts.net:3443`:
+record a voice note, review the transcript that fills the textarea, edit
+if needed, submit through the identical flow, confirm the proposed
+route. Then:
+
+```
+docker compose exec postgres psql -U nerve_app -d nerve -c \
+  "SELECT id, created_at, source_device, raw_input, outcome, confirmed_overridden FROM runs ORDER BY created_at DESC LIMIT 3;"
 ```
