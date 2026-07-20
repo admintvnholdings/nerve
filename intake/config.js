@@ -50,14 +50,14 @@ export const CONFIG = {
   // retry layer engaging (maximumAttempts: 1 at the workflow level).
   activityStartToCloseTimeoutMs: 150_000,
 
-  // M4: how long a pending task (submitted via the web app, awaiting a
-  // clarifying answer or a route confirm/override) sits before the sweep
-  // treats it as abandoned and writes a run record for it — same
-  // "every run is logged" principle as the CLI's abort handling.
-  // Overridable via env for testing; 15 minutes is a realistic idle
-  // threshold for "the owner walked away," not a demo-friendly one.
-  pendingTaskTtlMs: Number(process.env.PENDING_TASK_TTL_MS) || 15 * 60_000,
-  pendingTaskSweepIntervalMs: Number(process.env.PENDING_TASK_SWEEP_INTERVAL_MS) || 60_000,
+  // M4's pendingTaskTtlMs/pendingTaskSweepIntervalMs deliberately do NOT
+  // live here: this file gets bundled into Temporal's workflow sandbox
+  // (workflows import CONFIG for static values like
+  // activityStartToCloseTimeoutMs), and that sandbox has no `process`
+  // global — `process.env` at module scope throws ReferenceError at
+  // bundle-load time, not just returns undefined. Those two values are
+  // only ever used by web/server.js (never inside a workflow), so they're
+  // defined there instead, as local constants reading process.env.
 
   // M6 voice intake (spec Section 10 open decision 2, resolved: local,
   // no egress). Model is a request param to the local speaches server,
@@ -74,4 +74,32 @@ export const CONFIG = {
   voiceMaxDurationSeconds: 180,
   voiceMaxBytes: 10 * 1024 * 1024,
   voiceAllowedMimePrefix: 'audio/',
+
+  // M7 evaluator (spec Section 7, Section 9 tier table: "flagship —
+  // evaluator runs, plan reviews, contract-artifact diffs").
+  evaluatorTier: 'flagship',
+
+  // Corrected at v1.7: Section 7 previously said bookkeeping diffs "may
+  // auto-apply, up to a versioned per-run cap (default 5)" — superseded
+  // at v1.0 review to cap 0/classify-only, but the changelog row never
+  // landed. Both gates default to the conservative state; either one
+  // alone would already block auto-apply, cap 0 makes it structural
+  // rather than incidental. Loosen only by changelog, only after N
+  // cycles at >=95% unmodified owner approval of bookkeeping diffs
+  // (spec Section 7) — not a runtime value, a human decision gate.
+  evaluatorAutoApplyEnabled: false,
+  evaluatorAutoApplyCap: 0,
+
+  // Minimum sample size per check before a signal counts as a finding
+  // (actionable) rather than an observation (informational only).
+  // Small round numbers — conservative enough that single-digit samples
+  // don't produce noise dressed up as signal.
+  evaluatorOverrideRateMinN: 5,
+  evaluatorFrictionMinN: 5,
+  evaluatorCostOutlierMinN: 5,
+  evaluatorCalibrationMinN: 10,
+  // Dead-branch check gates on total corpus size, not per-outcome n —
+  // an outcome having zero occurrences means little until the corpus is
+  // large enough that "hasn't come up yet" becomes an unlikely explanation.
+  evaluatorDeadBranchCorpusMinN: 20,
 };

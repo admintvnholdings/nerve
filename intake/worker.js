@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// M3 Temporal worker: runs the Artifact and Skill outcome workflows on the
-// nerve-outcomes task queue. Long-running service — belongs in compose,
-// not invoked ad hoc like the CLI.
+// Temporal worker: runs the Artifact/Skill outcome workflows (M3) and the
+// evaluator workflow (M7) on the nerve-outcomes task queue. Long-running
+// service — belongs in compose, not invoked ad hoc like the CLI.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeConnection, Worker } from '@temporalio/worker';
-import * as activities from './activities.js';
+import * as outcomeActivities from './activities.js';
+import { runEvaluatorCycle } from './evaluator/activity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,7 +18,7 @@ async function main() {
   const worker = await Worker.create({
     connection,
     workflowsPath: path.join(__dirname, 'workflows', 'index.js'),
-    activities,
+    activities: { ...outcomeActivities, runEvaluatorCycle },
     taskQueue: 'nerve-outcomes',
   });
 
