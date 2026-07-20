@@ -82,8 +82,15 @@ async function main() {
       finalOutcome = answer.toLowerCase();
       confirmedOverridden = 'overridden';
     } else {
-      console.log('No explicit confirmation given — aborting without writing a run record.');
-      return;
+      // No explicit confirmation given. Still writes a run record — every
+      // run is logged, including the ones the owner walks away from,
+      // otherwise the data that later calibrates silence-default, tier
+      // escalation, and confidence thresholds is survivor-biased toward
+      // only confirmed/overridden routes. outcome stays the *proposed*
+      // route (never confirmed or overridden); confirmed_overridden
+      // records that distinctly as 'aborted'.
+      finalOutcome = route.outcome;
+      confirmedOverridden = 'aborted';
     }
 
     const record = await writeRunRecord(pool, {
