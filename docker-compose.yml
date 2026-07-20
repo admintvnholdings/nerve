@@ -94,9 +94,12 @@ services:
     command: ["node", "worker.js"]
 
   web:
-    # M4: desktop app v0 backend. Same glibc base as worker, same shared
-    # node_modules via bind mount. 127.0.0.1 only — literal for v0; access
-    # is an SSH tunnel (see README), mesh exposure waits for M5.
+    # Desktop app v0 backend (M4), mesh + mobile access (M5). Same glibc
+    # base as worker, same shared node_modules via bind mount. Two literal
+    # bindings only — never 0.0.0.0: 127.0.0.1 (SSH-tunnel fallback, M4)
+    # and the host's Tailscale IP (mesh access, M5). Tailscale is host-
+    # level and pre-existing, not a compose service — see README for the
+    # IP's fragility note.
     image: node:20-bookworm-slim
     restart: unless-stopped
     working_dir: /app
@@ -119,6 +122,7 @@ services:
       WEB_PORT: "3000"
     ports:
       - "127.0.0.1:3000:3000"
+      - "100.107.203.17:3000:3000"
     volumes:
       - ./intake:/app
       - ./output:/app/output

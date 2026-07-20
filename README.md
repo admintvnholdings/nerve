@@ -158,9 +158,9 @@ approve/observe verbs). Same underlying logic as the CLI
 (`intake/lib/*`, `dispatch.js`); `source_device` is always `web` here so
 the two interfaces are distinguishable in the run log.
 
-**Access:** the binding is literally `127.0.0.1` — this is v0, and mesh
-exposure (Tailscale) is explicitly M5's job, not this one's. From your
-own machine, open an SSH tunnel and browse locally:
+**Access:** originally `127.0.0.1`-only (v0); M5 (below) adds mesh access
+on top without removing this. From your own machine, an SSH tunnel still
+works:
 
 ```
 ssh -L 3000:127.0.0.1:3000 <user>@tvg-ai-server
@@ -176,10 +176,14 @@ CLI's override.
 held in an in-memory `Map` inside the `web` process (no new datastore —
 a known v0 limitation: state is lost on restart, single-instance only). A
 task the owner never returns to is swept after `PENDING_TASK_TTL_MS`
-(default 15 minutes) and written as an `aborted` run record — same
-semantics as the CLI's own abort handling (M2 closure), just triggered by
-elapsed time instead of a blank Enter. Override `PENDING_TASK_TTL_MS` /
-`PENDING_TASK_SWEEP_INTERVAL_MS` in compose for testing.
+(default 15 minutes): if a route had already been proposed, it's written
+as `aborted` — same semantics as the CLI's own abort handling (M2
+closure), just triggered by elapsed time instead of a blank Enter. If the
+task was abandoned *before* a route ever existed (an unanswered
+clarifying question), no pre-gate or router call is made to invent one —
+it's written as `unrouted` (spec v1.4) directly from the normalized
+statement. Override `PENDING_TASK_TTL_MS` / `PENDING_TASK_SWEEP_INTERVAL_MS`
+in compose for testing.
 
 ### M4 definition of done
 
@@ -193,4 +197,61 @@ appear side by side:
 ```
 docker compose exec postgres psql -U nerve_app -d nerve -c \
   "SELECT id, created_at, source_device, outcome, confirmed_overridden, status FROM runs ORDER BY created_at DESC LIMIT 10;"
+```
+
+## 10. Mesh + mobile access (M5)
+
+`web` is now reachable two ways — the binding is two literal IPs, never
+`0.0.0.0`:
+
+```yaml
+ports:
+  - "127.0.0.1:3000:3000"        # SSH-tunnel fallback (M4)
+  - "100.107.203.17:3000:3000"   # Tailscale — mesh + mobile (M5)
+```
+
+Tailscale itself is host-level and pre-existing on this machine — not a
+compose service, not something any milestone installed. From any device
+already enrolled in the same tailnet (phone included), just open
+`http://100.107.203.17:3000` — same page, same API, nothing mobile-
+specific beyond a viewport tag and light responsive CSS (table scrolls
+horizontally, inputs/buttons are touch-sized on narrow screens). No
+second implementation.
+
+**The Tailscale IP is hardcoded, not derived.** It's stable per-device but
+not guaranteed permanent — if the binding silently stops working, it's
+almost certainly because the IP changed. Re-check with `tailscale ip -4`
+and update `docker-compose.yml` if it no longer matches.
+
+**Trust boundary — read before enrolling any new device.** Nerve has no
+app-level login. Reachability is gated entirely by Tailscale's own
+device-level authentication, which is sound *only* because this tailnet
+is single-identity — one owner, their own devices (verify with
+`tailscale status`). **If any device or user outside the owner's identity
+is ever enrolled — including employee infrastructure such as an Open
+WebUI rollout — app-level authentication becomes mandatory before that
+enrollment, not after.** This isn't a default to revisit eventually; it's
+a precondition. See spec Section 8's Guardrails row (v1.5).
+
+**Open question, not solved here:** every API-originated run still
+records `source_device = 'web'`, regardless of whether it came from the
+phone, a PC browser, or the SSH tunnel. M5's own scope doesn't require
+telling those apart. Flagged as evaluator input (Section 7) for later —
+per-device calibration would need a real distinguishing signal (e.g. a
+client-supplied device label), not built now.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Page unreachable from the tailnet, but the SSH tunnel still works | `tailscale ip -4` on the server — if it no longer matches the IP in `docker-compose.yml`'s `web.ports`, update the binding and re-`docker compose up -d web` |
+
+### M5 definition of done
+
+From the iPhone (or any enrolled device), over the tailnet, on the same
+page: submit a task and confirm its route. Then:
+
+```
+docker compose exec postgres psql -U nerve_app -d nerve -c \
+  "SELECT id, created_at, source_device, outcome, confirmed_overridden FROM runs ORDER BY created_at DESC LIMIT 5;"
 ```
