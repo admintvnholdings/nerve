@@ -1,8 +1,8 @@
 # Nerve — Task Router System Specification
 
 **Inherits from:** Genesis Template v1.1 (root contract)
-**Status:** Frozen for build (v1.0)
-**Version:** 1.0
+**Status:** Frozen for build (v1.1)
+**Version:** 1.1
 
 ---
 
@@ -32,6 +32,7 @@ This document is a living artifact. Every revision appends a changelog row. Clau
 | 0.98 | 2026-07-20 | Cross-cutting requirements (8) gain a fixed notify-on taxonomy (ready-for-review / blocked / decision-needed / guardrail-attempted); evaluator (7) weekly cadence gains a blocked-beyond-30-minutes escalation exception. Source: AI Recon `governance/AUTONOMOUS_GUARDRAILS.md` (pattern only — retired vault paths in the source are not reused) | Tiaan + Claude |
 | 0.99 | 2026-07-20 | Cross-cutting requirements (8) Guardrails row now points to the owner's global authority-hierarchy / prompt-injection / nuke-confirmation rules as the binding source, without restating them in this spec. Source: AI Recon `governance/legislation.md`, `governance/SECURITY.md` | Tiaan + Claude |
 | 1.0 | 2026-07-20 | Cross-cutting requirements (8) gain a PII/secrets severity-ladder guardrail (credentials always halt, no operator override; classify up under uncertainty, never down; verdict-only, never auto-redacts). Open decision 6 (evaluator cadence) gains a candidate numeric data point (>20% false-positive or >5% miss rate as a version-bump trigger), not yet adopted. Source: AI Recon `skills/pii-detect.SKILL.md`. **AI Recon findings incorporated; frozen for build.** | Tiaan + Claude |
+| 1.1 | 2026-07-20 | M2 build: Section 9 model routing row's IDs verified live against the Anthropic models endpoint — economy = `claude-haiku-4-5-20251001`, workhorse = `claude-sonnet-5`, flagship = `claude-opus-4-8`; tier intent (economy/workhorse/flagship assignments from v0.6) unchanged, only concrete IDs corrected. Annex noted for Sonnet 5's expiring intro pricing and its heavier tokenizer, so the evaluator (7) doesn't misread the September cost step-up as drift | Tiaan + Claude |
 
 **Editing rules (binding):**
 1. Structural sections (1–8) stay vendor-agnostic. Tool names appear only in Section 9 (Implementation annex) and are marked swappable.
@@ -214,7 +215,7 @@ Current concrete choices on the owner's stack. Any row may be replaced without c
 |---|---|
 | Orchestration host | tvg-ai-server (Ubuntu 24.04) — orchestration only; no large local inference (GPU limited to sub-3B quantized) |
 | Workflow engine | Temporal (parent/child workflows, durable state, execution history) |
-| Model routing | LiteLLM (per-key spend tracking feeds `measures.cost`), introduced at M2. Current tier assignments (swappable): economy = Claude Haiku 4.5 ($1/$5 per MTok); workhorse = Claude Sonnet 4.6 ($3/$15); flagship = Claude Opus-class ($5/$25). Hosted aggregators (e.g. OpenRouter) may sit behind LiteLLM as provider rows — never replace it. Claude Code build sessions (incl. M1) run on the workhorse tier; verify auth mode (subscription vs. API credits) before long sessions |
+| Model routing | LiteLLM (per-key spend tracking feeds `measures.cost`), introduced at M2 — model IDs verified live against the Anthropic models endpoint on 2026-07-20. Current tier assignments (swappable): economy = `claude-haiku-4-5-20251001` ($1/$5 per MTok); workhorse = `claude-sonnet-5`, intro pricing $2/$10 per MTok through 2026-08-31 then $3/$15 — its tokenizer also yields ~30% more tokens for the same text vs. the retired Sonnet 4.6, so per-run cost steps up in September on pricing and tokenizer grounds alone; the evaluator (7) should not read that step as drift; flagship = `claude-opus-4-8` ($5/$25 per MTok). Hosted aggregators (e.g. OpenRouter) may sit behind LiteLLM as provider rows — never replace it. Claude Code build sessions (incl. M1) run on the workhorse tier; verify auth mode (subscription vs. API credits) before long sessions |
 | Run log + retrieval | PostgreSQL; pgvector for retrieval index |
 | Fast state / messaging | Redis / NATS |
 | Object storage | MinIO |
