@@ -1,8 +1,8 @@
 # Nerve
 
 See `docs/nerve-system-spec-v1.0.md` and `CLAUDE.md` for the full contract.
-This file covers M1 (run record schema), M2 (intake + router CLI), and M3
-(Artifact/Skill outcome dispatch via Temporal).
+This file covers M1 (run record schema), M2 (intake + router CLI), M3
+(Artifact/Skill outcome dispatch via Temporal), and M4 (desktop app v0).
 
 ## 1. Configure secrets
 
@@ -24,8 +24,9 @@ Brings up `postgres` (`pgvector/pgvector:pg16`, bound to `127.0.0.1:5432`,
 data on the `/data` array — not the root disk), `litellm` (bound to
 `127.0.0.1:4000`, fronting Anthropic per spec Section 9 —
 economy/workhorse/flagship tiers), `temporal` (bound to `127.0.0.1:7233`,
-schema auto-applied against the same postgres instance), and `worker`
-(the M3 Temporal worker — no exposed port).
+schema auto-applied against the same postgres instance), `worker` (the M3
+Temporal worker — no exposed port), and `web` (the M4 desktop app v0
+backend, bound to `127.0.0.1:3000`).
 
 ## 3. Apply migrations
 
@@ -128,9 +129,9 @@ attempts — not just the last) independent of Temporal's own retry layer.
 The deliverable's content is written to `./output/<outcome>/<run_id>.md`
 — never into the run record, which stores only a pointer (`output_ref`)
 plus metadata (`workflow_id`, `workflow_version`, `status`, `duration_ms`,
-`cost_usd`, `tokens`, `outcome_shipped`). `outcome_shipped` for M3 is a
-flagged simplification: true iff the workflow completed without error and
-produced non-empty output — no real goal-verification step exists yet.
+`cost_usd`, `tokens`, `outcome_shipped`). `outcome_shipped` stays **null**
+(spec v1.3) until a real goal-verification mechanism exists (M7) —
+completion itself is tracked via `status`.
 
 ### M3 definition of done
 
@@ -147,3 +148,49 @@ cat output/skill/<run_id>.md
 Both rows show populated `execution`/`measures`/`output_ref`; both files
 exist on disk; spend is visible on the `artifact`/`skill` virtual keys in
 LiteLLM.
+
+## 9. Desktop app v0 (M4)
+
+`web` (`intake/web/server.js`) serves both a small JSON API and a static
+page (`intake/web/public/index.html`) on `127.0.0.1:3000` — task entry,
+route confirmation, run history (spec Section 11 M4 / 4.1's submit/
+approve/observe verbs). Same underlying logic as the CLI
+(`intake/lib/*`, `dispatch.js`); `source_device` is always `web` here so
+the two interfaces are distinguishable in the run log.
+
+**Access:** the binding is literally `127.0.0.1` — this is v0, and mesh
+exposure (Tailscale) is explicitly M5's job, not this one's. From your
+own machine, open an SSH tunnel and browse locally:
+
+```
+ssh -L 3000:127.0.0.1:3000 <user>@tvg-ai-server
+# then open http://127.0.0.1:3000 in your own browser
+```
+
+**Confirmation semantics are identical to the CLI** — same shared
+`intake/config.js`: silence-default disabled, every route requires an
+explicit Confirm/Override click, an override is recorded exactly like the
+CLI's override.
+
+**Abandoned tasks:** submit → clarify → confirm is a multi-request flow
+held in an in-memory `Map` inside the `web` process (no new datastore —
+a known v0 limitation: state is lost on restart, single-instance only). A
+task the owner never returns to is swept after `PENDING_TASK_TTL_MS`
+(default 15 minutes) and written as an `aborted` run record — same
+semantics as the CLI's own abort handling (M2 closure), just triggered by
+elapsed time instead of a blank Enter. Override `PENDING_TASK_TTL_MS` /
+`PENDING_TASK_SWEEP_INTERVAL_MS` in compose for testing.
+
+### M4 definition of done
+
+Through the browser (or `curl`, exercising the same API): submit a task,
+answer a clarifying question if asked, confirm or override the proposed
+route, and watch it dispatch and land in the run history table — then
+leave a second task unconfirmed and let the TTL sweep age it into an
+`aborted` row. Read back `runs` and confirm both `cli` and `web` rows
+appear side by side:
+
+```
+docker compose exec postgres psql -U nerve_app -d nerve -c \
+  "SELECT id, created_at, source_device, outcome, confirmed_overridden, status FROM runs ORDER BY created_at DESC LIMIT 10;"
+```
