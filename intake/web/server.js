@@ -18,6 +18,11 @@ import { preGateThenRoute, SOURCE_DEVICE } from './pipeline.js';
 import * as pendingStore from './pendingStore.js';
 import { CONFIG } from '../config.js';
 
+// Not in config.js (see the comment there) — only used here, never
+// inside a Temporal workflow.
+const PENDING_TASK_TTL_MS = Number(process.env.PENDING_TASK_TTL_MS) || 15 * 60_000;
+const PENDING_TASK_SWEEP_INTERVAL_MS = Number(process.env.PENDING_TASK_SWEEP_INTERVAL_MS) || 60_000;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pool = makePool();
 const app = express();
@@ -194,6 +199,67 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
   }
 });
 
+// M7 approval queue (spec Section 4.1's "approve" verb, extended to
+// evaluator diffs). Defaults to 'pending' — the actionable queue;
+// ?status=all shows observations and past decisions too.
+app.get('/api/findings', async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const where = status === 'all' ? '' : 'WHERE status = $1';
+    const params = status === 'all' ? [] : [status];
+    const { rows } = await pool.query(
+      `SELECT id, created_at, run_batch_id, kind, category, target_artifact, current_value,
+              proposed_value, evidence_run_ids, n, gate_threshold, evidence_strength, rationale,
+              status, decided_at, decided_by, decision_reason
+       FROM evaluator_findings ${where} ORDER BY created_at DESC`,
+      params,
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function decideFinding(req, res, toStatus) {
+  try {
+    const { id } = req.params;
+    const reason = (req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'reason is required' });
+
+    const { rows: [current] } = await pool.query(
+      `SELECT status FROM evaluator_findings WHERE id = $1`, [id],
+    );
+    if (!current) return res.status(404).json({ error: 'finding not found' });
+    if (current.status !== 'pending') {
+      return res.status(409).json({ error: `finding is already "${current.status}", not pending` });
+    }
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE evaluator_findings
+       SET status = $1, decided_at = now(), decided_by = 'owner', decision_reason = $2
+       WHERE id = $3 AND status = 'pending'
+       RETURNING id, status, decided_at`,
+      [toStatus, reason, id],
+    );
+    if (!updated) return res.status(409).json({ error: 'finding was decided concurrently' });
+
+    await pool.query(
+      `INSERT INTO evaluator_finding_transitions (finding_id, from_status, to_status, reason, actor)
+       VALUES ($1, 'pending', $2, $3, 'owner')`,
+      [id, toStatus, reason],
+    );
+
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+app.post('/api/findings/:id/approve', (req, res) => decideFinding(req, res, 'approved'));
+app.post('/api/findings/:id/reject', (req, res) => decideFinding(req, res, 'rejected'));
+
 app.get('/api/runs', async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
@@ -221,7 +287,7 @@ app.get('/api/runs', async (req, res) => {
 async function sweepStalePendingTasks() {
   const now = Date.now();
   for (const [id, task] of pendingStore.entries()) {
-    if (now - task.lastActivityAt < CONFIG.pendingTaskTtlMs) continue;
+    if (now - task.lastActivityAt < PENDING_TASK_TTL_MS) continue;
     try {
       if (task.stage === 'route_proposed') {
         await writeRunRecord(pool, {
@@ -262,7 +328,7 @@ async function sweepStalePendingTasks() {
 }
 setInterval(() => {
   sweepStalePendingTasks().catch((err) => console.error('Sweep error:', err));
-}, CONFIG.pendingTaskSweepIntervalMs);
+}, PENDING_TASK_SWEEP_INTERVAL_MS);
 
 const PORT = process.env.WEB_PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {

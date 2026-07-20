@@ -21,6 +21,11 @@
   th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
   .muted { color: #888; }
   input[type=text] { font: inherit; padding: 0.5rem; width: 100%; max-width: 320px; }
+  .finding { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; }
+  .finding.substantive { border-left: 4px solid #b45309; }
+  .finding.bookkeeping { border-left: 4px solid #1d4ed8; }
+  .finding .badge { display: inline-block; font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: #eee; margin-right: 0.3rem; }
+  .finding textarea.reason { width: 100%; font: inherit; padding: 0.4rem; margin: 0.4rem 0; }
   @media (max-width: 480px) {
     body { margin: 1rem auto; }
     input[type=text] { max-width: 100%; display: block; margin: 0.4rem 0; }
@@ -41,6 +46,9 @@
   </form>
 
   <div id="panel"><span class="muted">Nothing submitted yet.</span></div>
+
+  <h2>Approval queue <button id="refresh-findings" type="button">Refresh</button></h2>
+  <div id="findings-list"><span class="muted">Loading...</span></div>
 
   <h2>Run history <button id="refresh-runs" type="button">Refresh</button></h2>
   <div class="table-scroll">
@@ -214,6 +222,59 @@ document.getElementById('submit-form').addEventListener('submit', async (e) => {
     panel.innerHTML = `<p style="color:red">Error: ${esc(err.message)}</p>`;
   }
 });
+
+// M7 approval queue.
+function renderFinding(f) {
+  const evidence = (f.evidence_run_ids || []).length
+    ? `<p class="muted">Evidence (${f.evidence_run_ids.length} run${f.evidence_run_ids.length === 1 ? '' : 's'}): ${f.evidence_run_ids.map((id) => esc(id.slice(0, 8))).join(', ')}</p>`
+    : '<p class="muted">Evidence: none (structural finding, not run-derived)</p>';
+  return `
+    <div class="finding ${esc(f.category || '')}">
+      <span class="badge">${esc(f.kind)}</span>
+      <span class="badge">${esc(f.category || 'n/a')}</span>
+      <span class="badge">${esc(f.evidence_strength)}</span>
+      <strong>${esc(f.target_artifact)}</strong>
+      <p>n=${f.n} / gate=${f.gate_threshold ?? 'n/a'}</p>
+      ${f.current_value ? `<p>Current: ${esc(f.current_value)}</p>` : ''}
+      ${f.proposed_value ? `<p>Proposed: ${esc(f.proposed_value)}</p>` : ''}
+      <p>${esc(f.rationale)}</p>
+      ${evidence}
+      ${f.status === 'pending' ? `
+        <textarea class="reason" data-id="${f.id}" placeholder="Reason (required for either decision)" rows="2"></textarea>
+        <button type="button" class="approve-btn" data-id="${f.id}">Approve</button>
+        <button type="button" class="reject-btn" data-id="${f.id}">Reject</button>
+      ` : `<p class="muted">Status: ${esc(f.status)}${f.decision_reason ? ` — "${esc(f.decision_reason)}"` : ''}</p>`}
+    </div>
+  `;
+}
+
+async function decideFinding(id, action) {
+  const reason = document.querySelector(`textarea.reason[data-id="${id}"]`)?.value.trim();
+  if (!reason) { alert('A reason is required.'); return; }
+  try {
+    await api(`/api/findings/${id}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) });
+    loadFindings();
+  } catch (err) {
+    alert(`Failed: ${err.message}`);
+  }
+}
+
+async function loadFindings() {
+  const rows = await api('/api/findings?status=pending');
+  const container = document.getElementById('findings-list');
+  container.innerHTML = rows.length
+    ? rows.map(renderFinding).join('')
+    : '<p class="muted">No pending findings.</p>';
+  container.querySelectorAll('.approve-btn').forEach((btn) => {
+    btn.addEventListener('click', () => decideFinding(btn.dataset.id, 'approve'));
+  });
+  container.querySelectorAll('.reject-btn').forEach((btn) => {
+    btn.addEventListener('click', () => decideFinding(btn.dataset.id, 'reject'));
+  });
+}
+
+document.getElementById('refresh-findings').addEventListener('click', loadFindings);
+loadFindings();
 
 async function loadRuns() {
   const rows = await api('/api/runs?limit=50');

@@ -83,11 +83,20 @@ services:
         condition: service_healthy
       litellm:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_ARTIFACT_KEY: ${LITELLM_ARTIFACT_KEY}
       LITELLM_SKILL_KEY: ${LITELLM_SKILL_KEY}
+      # M7: the evaluator activity runs in this worker too, reading/
+      # writing the run log and evaluator_findings.
+      LITELLM_EVALUATOR_KEY: ${LITELLM_EVALUATOR_KEY}
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      NERVE_APP_PASSWORD: ${NERVE_APP_PASSWORD}
     volumes:
       - ./intake:/app
       - ./output:/app/output
