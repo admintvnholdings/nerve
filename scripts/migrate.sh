@@ -7,13 +7,14 @@ set -a
 source .env
 set +a
 
-COMPOSE="docker compose"
-PSQL_SUPER=("$COMPOSE" exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1)
+PSQL_SUPER=(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1)
 
 echo "Waiting for postgres to be ready..."
-until "${PSQL_SUPER[@]}" -c 'select 1' >/dev/null 2>&1; do
+for _ in $(seq 1 30); do
+    "${PSQL_SUPER[@]}" -c 'select 1' >/dev/null 2>&1 && break
     sleep 1
 done
+"${PSQL_SUPER[@]}" -c 'select 1' >/dev/null || { echo "postgres did not become ready in time" >&2; exit 1; }
 
 "${PSQL_SUPER[@]}" -c "
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -29,7 +30,7 @@ for file in migrations/*.sql; do
         continue
     fi
     echo "apply $name"
-    "${PSQL_SUPER[@]}" -v app_password="'${NERVE_APP_PASSWORD}'" -f "$file"
+    "${PSQL_SUPER[@]}" -v app_password="'${NERVE_APP_PASSWORD}'" < "$file"
     "${PSQL_SUPER[@]}" -c "INSERT INTO schema_migrations (filename) VALUES ('$name')" >/dev/null
 done
 

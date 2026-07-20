@@ -7,8 +7,7 @@ set -a
 source .env
 set +a
 
-COMPOSE="docker compose"
-PSQL_APP=("$COMPOSE" exec -T postgres env PGPASSWORD="$NERVE_APP_PASSWORD" \
+PSQL_APP=(docker compose exec -T postgres env PGPASSWORD="$NERVE_APP_PASSWORD" \
     psql -U nerve_app -d "$POSTGRES_DB" -v ON_ERROR_STOP=1)
 
 echo "Inserting fake run..."
@@ -37,7 +36,7 @@ INSERT INTO runs (
     850,
     true
 ) RETURNING id;
-")"
+" | head -n1)"
 
 echo "Inserted run_id: $NEW_ID"
 echo "Reading it back..."
@@ -45,7 +44,11 @@ echo "Reading it back..."
 
 echo "Confirming nerve_app cannot UPDATE/DELETE (expected: permission denied)..."
 set +e
-"${PSQL_APP[@]}" -c "DELETE FROM runs WHERE id = '${NEW_ID}';" 2>&1 | grep -i "permission denied" \
-    && echo "OK: append-only enforced." \
-    || echo "WARNING: delete was not rejected — check migrations/002."
+DELETE_OUTPUT="$("${PSQL_APP[@]}" -c "DELETE FROM runs WHERE id = '${NEW_ID}';" 2>&1)"
 set -e
+echo "$DELETE_OUTPUT"
+if echo "$DELETE_OUTPUT" | grep -qi "permission denied"; then
+    echo "OK: append-only enforced."
+else
+    echo "WARNING: delete was not rejected — check migrations/002."
+fi
