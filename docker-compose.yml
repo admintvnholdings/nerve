@@ -92,3 +92,34 @@ services:
       - ./intake:/app
       - ./output:/app/output
     command: ["node", "worker.js"]
+
+  web:
+    # M4: desktop app v0 backend. Same glibc base as worker, same shared
+    # node_modules via bind mount. 127.0.0.1 only — literal for v0; access
+    # is an SSH tunnel (see README), mesh exposure waits for M5.
+    image: node:20-bookworm-slim
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      NERVE_APP_PASSWORD: ${NERVE_APP_PASSWORD}
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_NORMALIZER_KEY: ${LITELLM_NORMALIZER_KEY}
+      LITELLM_ROUTER_KEY: ${LITELLM_ROUTER_KEY}
+      TEMPORAL_ADDRESS: temporal:7233
+      WEB_PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./intake:/app
+      - ./output:/app/output
+    command: ["node", "web/server.js"]

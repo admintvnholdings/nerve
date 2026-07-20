@@ -19,9 +19,10 @@ export const CONFIG = {
   // silenceDefaultEnabled is true.
   routeConfidenceThreshold: 0.7,
 
-  // Starts disabled: M2 requires explicit confirmation on every route,
-  // regardless of confidence. Loosen only once override data justifies
-  // it, and only via a changelog entry — never silently.
+  // Starts disabled: every route requires explicit confirmation,
+  // regardless of confidence — true for both the CLI and the M4 web app,
+  // one shared value. Loosen only once override data justifies it, and
+  // only via a changelog entry — never silently.
   silenceDefaultEnabled: false,
 
   // Pre-gate check 2 (Section 5): lookback window for duplicate-intent
@@ -48,4 +49,13 @@ export const CONFIG = {
   // covers 3 sequential 30s attempts plus overhead, without Temporal's
   // retry layer engaging (maximumAttempts: 1 at the workflow level).
   activityStartToCloseTimeoutMs: 150_000,
+
+  // M4: how long a pending task (submitted via the web app, awaiting a
+  // clarifying answer or a route confirm/override) sits before the sweep
+  // treats it as abandoned and writes a run record for it — same
+  // "every run is logged" principle as the CLI's abort handling.
+  // Overridable via env for testing; 15 minutes is a realistic idle
+  // threshold for "the owner walked away," not a demo-friendly one.
+  pendingTaskTtlMs: Number(process.env.PENDING_TASK_TTL_MS) || 15 * 60_000,
+  pendingTaskSweepIntervalMs: Number(process.env.PENDING_TASK_SWEEP_INTERVAL_MS) || 60_000,
 };

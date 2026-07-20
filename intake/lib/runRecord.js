@@ -12,8 +12,10 @@ const VALID_OUTCOMES = new Set([
 
 export function makePool() {
   return new pg.Pool({
-    host: '127.0.0.1',
-    port: 5432,
+    // CLI runs on the host (127.0.0.1 default); the M4 web server runs in
+    // a container and sets PGHOST=postgres via compose.
+    host: process.env.PGHOST || '127.0.0.1',
+    port: Number(process.env.PGPORT) || 5432,
     user: 'nerve_app',
     password: process.env.NERVE_APP_PASSWORD,
     database: process.env.POSTGRES_DB || 'nerve',

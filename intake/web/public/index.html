@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nerve — v0</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  h2 { font-size: 1rem; margin-top: 2rem; color: #444; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.5rem; }
+  button { font: inherit; padding: 0.4rem 0.9rem; margin-right: 0.5rem; cursor: pointer; }
+  pre { background: #f4f4f4; padding: 0.75rem; overflow-x: auto; font-size: 0.85rem; }
+  #panel { border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin-top: 1rem; min-height: 2rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
+  .muted { color: #888; }
+  input[type=text] { font: inherit; padding: 0.3rem; }
+</style>
+</head>
+<body>
+  <h1>Nerve — v0</h1>
+
+  <form id="submit-form">
+    <textarea id="task-text" rows="3" placeholder="Describe a task..."></textarea>
+    <div style="margin-top:0.5rem"><button type="submit">Submit</button></div>
+  </form>
+
+  <div id="panel"><span class="muted">Nothing submitted yet.</span></div>
+
+  <h2>Run history <button id="refresh-runs" type="button">Refresh</button></h2>
+  <table id="runs-table">
+    <thead>
+      <tr><th>Time</th><th>Source</th><th>Outcome</th><th>Confirmed/Overridden</th><th>Status</th><th>Cost</th><th>Tokens</th><th>Output</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+const panel = document.getElementById('panel');
+let currentTaskId = null;
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+function renderTerminal(data, label) {
+  panel.innerHTML = `
+    <p><strong>${label}</strong> ${data.reason ? '— ' + esc(data.reason) : ''}</p>
+    ${data.runId ? `<p class="muted">Run recorded: ${data.runId}</p>` : ''}
+  `;
+  loadRuns();
+}
+
+function renderClarify(data) {
+  currentTaskId = data.taskId;
+  panel.innerHTML = `
+    <p><strong>Clarifying question:</strong> ${esc(data.question)}</p>
+    <input id="clarify-answer" type="text" size="50" placeholder="Your answer">
+    <button id="clarify-submit" type="button">Submit answer</button>
+  `;
+  document.getElementById('clarify-submit').onclick = async () => {
+    const answer = document.getElementById('clarify-answer').value;
+    const data = await api(`/api/tasks/${currentTaskId}/clarify`, {
+      method: 'POST', body: JSON.stringify({ answer }),
+    });
+    handleResponse(data);
+  };
+}
+
+function renderRouteProposed(data) {
+  currentTaskId = data.taskId;
+  panel.innerHTML = `
+    <p><strong>Normalized task:</strong></p>
+    <pre>${esc(JSON.stringify(data.normalized, null, 2))}</pre>
+    <p><strong>Proposed route:</strong></p>
+    <pre>${esc(JSON.stringify(data.route, null, 2))}</pre>
+    <p>Confidence ${data.route.overallConfidence} vs threshold ${data.routeConfidenceThreshold}
+       (silence-default ${data.silenceDefaultEnabled ? 'enabled' : 'disabled'}) —
+       explicit confirmation required.</p>
+    <button id="confirm-btn" type="button">Confirm "${esc(data.route.outcome)}"</button>
+    <input id="override-outcome" type="text" placeholder="override outcome" size="20">
+    <button id="override-btn" type="button">Override</button>
+  `;
+  document.getElementById('confirm-btn').onclick = async () => {
+    const data = await api(`/api/tasks/${currentTaskId}/confirm`, {
+      method: 'POST', body: JSON.stringify({ action: 'confirm' }),
+    });
+    renderTerminal(data, `CONFIRMED: ${data.outcome}`);
+  };
+  document.getElementById('override-btn').onclick = async () => {
+    const outcome = document.getElementById('override-outcome').value;
+    const data = await api(`/api/tasks/${currentTaskId}/confirm`, {
+      method: 'POST', body: JSON.stringify({ action: 'override', outcome }),
+    });
+    renderTerminal(data, `OVERRIDDEN: ${data.outcome}`);
+  };
+}
+
+function handleResponse(data) {
+  if (data.status === 'clarify') return renderClarify(data);
+  if (data.status === 'route_proposed') return renderRouteProposed(data);
+  return renderTerminal(data, data.status.toUpperCase());
+}
+
+document.getElementById('submit-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = document.getElementById('task-text').value.trim();
+  if (!text) return;
+  panel.innerHTML = '<span class="muted">Submitting...</span>';
+  try {
+    const data = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ text }) });
+    handleResponse(data);
+  } catch (err) {
+    panel.innerHTML = `<p style="color:red">Error: ${esc(err.message)}</p>`;
+  }
+});
+
+async function loadRuns() {
+  const rows = await api('/api/runs?limit=50');
+  const tbody = document.querySelector('#runs-table tbody');
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${new Date(r.created_at).toLocaleString()}</td>
+      <td>${esc(r.source_device)}</td>
+      <td>${esc(r.outcome)}</td>
+      <td>${esc(r.confirmed_overridden || '')}</td>
+      <td>${esc(r.status || '')}</td>
+      <td>${r.cost_usd ?? ''}</td>
+      <td>${r.tokens ?? ''}</td>
+      <td>${r.output_ref ? esc(r.output_ref) : ''}</td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('refresh-runs').addEventListener('click', loadRuns);
+loadRuns();
+setInterval(loadRuns, 5000);
+</script>
+</body>
+</html>
