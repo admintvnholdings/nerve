@@ -28,4 +28,24 @@ export const CONFIG = {
   // detection against the run log. Exact raw_input match only — semantic
   // near-duplicate detection is a natural later enhancement, not built here.
   duplicateLookbackHours: 24,
+
+  // Section 9: Artifact/Skill dispatch (M3) is "building" — workhorse
+  // tier, not economy (reserved for classification/extraction/triage).
+  artifactTier: 'workhorse',
+  skillTier: 'workhorse',
+
+  // Retry policy for the two M3 activities (produceArtifact,
+  // draftSkillContract). 3 attempts balances transient LiteLLM/network
+  // hiccups against silently hammering a persistently bad prompt; 30s per
+  // attempt is generous for a short (few-hundred-token) completion without
+  // letting one hung connection block the workflow indefinitely. Retries
+  // run inside the activity (not Temporal's automatic retry) so cost/
+  // tokens from every attempt sum into the result — Temporal's own retry
+  // would discard a failed attempt's already-billed usage.
+  activityMaxAttempts: 3,
+  activityAttemptTimeoutMs: 30_000,
+  // Temporal's own startToCloseTimeout on the activity call: comfortably
+  // covers 3 sequential 30s attempts plus overhead, without Temporal's
+  // retry layer engaging (maximumAttempts: 1 at the workflow level).
+  activityStartToCloseTimeoutMs: 150_000,
 };

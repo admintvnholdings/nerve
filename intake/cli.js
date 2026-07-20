@@ -3,10 +3,12 @@
 // written. No UI beyond this CLI.
 import readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import { randomUUID } from 'node:crypto';
 import { normalize } from './lib/normalize.js';
 import { preGate } from './lib/pregate.js';
 import { routeAuto } from './lib/router.js';
 import { makePool, writeRunRecord } from './lib/runRecord.js';
+import { dispatchable, dispatch } from './dispatch.js';
 import { CONFIG } from './config.js';
 
 const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -16,6 +18,7 @@ async function main() {
   const rawInput = process.argv.slice(2).join(' ').trim() || (await ask('Task: '));
   if (!rawInput) throw new Error('No task text given.');
   const sourceDevice = process.env.NERVE_SOURCE_DEVICE || 'cli';
+  const runId = randomUUID();
   const pool = makePool();
 
   try {
@@ -38,6 +41,7 @@ async function main() {
 
     if (gate.decision !== 'proceed') {
       const record = await writeRunRecord(pool, {
+        id: runId,
         sourceDevice,
         rawInput,
         normalizedStatement: normalized,
@@ -93,7 +97,21 @@ async function main() {
       confirmedOverridden = 'aborted';
     }
 
+    // M3: dispatch only fires for a confirmed/overridden outcome that has
+    // a real workflow behind it (Artifact, Skill). Every other outcome —
+    // including aborted — stays exactly as M2: no dispatch, execution/
+    // measures/output_ref null.
+    let dispatchResult = {};
+    if (confirmedOverridden !== 'aborted' && dispatchable(finalOutcome)) {
+      console.log(`\nDispatching ${finalOutcome} workflow...`);
+      dispatchResult = await dispatch(finalOutcome, runId, normalized);
+      if (dispatchResult.status === 'failed') {
+        console.log(`Workflow failed (${dispatchResult.errorClass}) — recording the run as failed, not shipped.`);
+      }
+    }
+
     const record = await writeRunRecord(pool, {
+      id: runId,
       sourceDevice,
       rawInput,
       normalizedStatement: normalized,
@@ -102,10 +120,23 @@ async function main() {
       routeConfidence: route.overallConfidence,
       outcome: finalOutcome,
       confirmedOverridden,
+      workflowId: dispatchResult.workflowId,
+      workflowVersion: dispatchResult.workflowVersion,
+      skillsInvoked: dispatchResult.workflowId ? [] : null,
+      status: dispatchResult.status,
+      errorClass: dispatchResult.errorClass,
+      durationMs: dispatchResult.durationMs,
+      costUsd: dispatchResult.costUsd,
+      tokens: dispatchResult.tokens,
+      outcomeShipped: dispatchResult.outcomeShipped,
+      outputRef: dispatchResult.outputRef,
     });
 
     console.log(`\n${confirmedOverridden.toUpperCase()}: ${finalOutcome}`);
     console.log(`Run recorded: ${record.id} at ${record.created_at.toISOString()}`);
+    if (dispatchResult.outputRef) {
+      console.log(`Deliverable: ${dispatchResult.outputRef}`);
+    }
   } finally {
     rl.close();
     await pool.end();
