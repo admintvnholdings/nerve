@@ -245,6 +245,7 @@ client-supplied device label), not built now.
 | Symptom | Check |
 |---|---|
 | Page unreachable from the tailnet, but the SSH tunnel still works | `tailscale ip -4` on the server — if it no longer matches the IP in `docker-compose.yml`'s `web.ports`, update the binding and re-`docker compose up -d web` |
+| Nothing loads at all from any tailnet device, port confirmed listening (`ss -tlnp \| grep 3000`) | UFW: `sudo ufw status verbose` — a default-deny `INPUT` policy silently drops the connection before it reaches Docker. Fix: `sudo ufw allow in on tailscale0 to any port 3000 proto tcp`. This bit us during the actual M5 build — zero incoming connections ever reached the port from the tailnet until this rule was added |
 
 ### M5 definition of done
 
