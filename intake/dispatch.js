@@ -35,7 +35,10 @@ export async function dispatch(outcome, runId, normalized) {
       durationMs: Date.now() - startedAt,
       costUsd: result.costUsd,
       tokens: result.tokens,
-      outcomeShipped: true,
+      // Spec v1.3: outcome_shipped stays null until a real goal-
+      // verification mechanism exists (M7) — completion is tracked via
+      // status above, not a proxy on this field.
+      outcomeShipped: null,
       outputRef: result.outputRef,
     };
   } catch (err) {
@@ -47,7 +50,7 @@ export async function dispatch(outcome, runId, normalized) {
       durationMs: Date.now() - startedAt,
       costUsd: null,
       tokens: null,
-      outcomeShipped: false,
+      outcomeShipped: null,
       outputRef: null,
     };
   } finally {
