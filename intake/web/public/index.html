@@ -32,8 +32,12 @@
   <h1>Nerve — v0</h1>
 
   <form id="submit-form">
-    <textarea id="task-text" rows="3" placeholder="Describe a task..."></textarea>
-    <div style="margin-top:0.5rem"><button type="submit">Submit</button></div>
+    <textarea id="task-text" rows="3" placeholder="Describe a task, or use the mic..."></textarea>
+    <div style="margin-top:0.5rem">
+      <button type="submit">Submit</button>
+      <button type="button" id="record-btn">🎙 Record</button>
+      <span id="record-status" class="muted"></span>
+    </div>
   </form>
 
   <div id="panel"><span class="muted">Nothing submitted yet.</span></div>
@@ -53,6 +57,81 @@ const panel = document.getElementById('panel');
 let currentTaskId = null;
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// M6: voice is just a way to fill the textarea (spec Section 4.3 —
+// "same Intake as typed input"). Everything after this block — submit,
+// clarify, confirm, run history — is untouched from M4/M5.
+// MAX_RECORD_SECONDS mirrors intake/config.js's voiceMaxDurationSeconds —
+// keep the two in sync if that value ever changes.
+const MAX_RECORD_SECONDS = 180;
+let mediaRecorder = null;
+let audioChunks = [];
+let recordTimerHandle = null;
+
+function setRecordStatus(text) {
+  document.getElementById('record-status').textContent = text;
+}
+
+async function startRecording() {
+  if (!window.isSecureContext) {
+    setRecordStatus('Mic needs HTTPS — use the :3443 URL, not :3000.');
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    setRecordStatus(`Mic access denied or unavailable: ${err.message}`);
+    return;
+  }
+
+  audioChunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach((t) => t.stop());
+    clearInterval(recordTimerHandle);
+    void uploadRecording(new Blob(audioChunks, { type: mediaRecorder.mimeType }));
+  };
+  mediaRecorder.start();
+
+  const recordBtn = document.getElementById('record-btn');
+  recordBtn.textContent = '⏹ Stop';
+  const startedAt = Date.now();
+  recordTimerHandle = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    setRecordStatus(`Recording... ${elapsed}s / ${MAX_RECORD_SECONDS}s`);
+    if (elapsed >= MAX_RECORD_SECONDS) stopRecording();
+  }, 250);
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  document.getElementById('record-btn').textContent = '🎙 Record';
+}
+
+async function uploadRecording(blob) {
+  setRecordStatus('Transcribing... (local CPU model — can take up to a minute)');
+  try {
+    const form = new FormData();
+    form.append('audio', blob, 'recording.webm');
+    const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    document.getElementById('task-text').value = body.text;
+    setRecordStatus('Transcribed — review and Submit.');
+  } catch (err) {
+    setRecordStatus(`Transcription failed: ${err.message}`);
+  }
+}
+
+document.getElementById('record-btn').addEventListener('click', () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+});
 
 async function api(path, opts) {
   const res = await fetch(path, {
