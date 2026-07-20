@@ -110,6 +110,8 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
+      stt:
+        condition: service_healthy
     environment:
       PGHOST: postgres
       PGPORT: "5432"
@@ -120,10 +122,40 @@ services:
       LITELLM_ROUTER_KEY: ${LITELLM_ROUTER_KEY}
       TEMPORAL_ADDRESS: temporal:7233
       WEB_PORT: "3000"
+      WEB_HTTPS_PORT: "3443"
+      # M6: HTTPS on the tailnet IP only — mic access needs a secure
+      # context, which 127.0.0.1 already gets via the loopback exception.
+      TLS_CERT_PATH: /certs/tvg-ai-server-1.taild4a3b1.ts.net.crt
+      TLS_KEY_PATH: /certs/tvg-ai-server-1.taild4a3b1.ts.net.key
+      STT_BASE_URL: http://stt:8000
     ports:
       - "127.0.0.1:3000:3000"
       - "100.107.203.17:3000:3000"
+      - "100.107.203.17:3443:3443"
     volumes:
       - ./intake:/app
       - ./output:/app/output
+      - ./certs:/certs:ro
     command: ["node", "web/server.js"]
+
+  stt:
+    # M6: local speech-to-text, no egress. Spec Section 10 open decision 2
+    # resolved: local (not hosted/GPU) — CPU/int8 faster-whisper via the
+    # speaches server (OpenAI-compatible /v1/audio/transcriptions).
+    # Internal-only: no ports published to the host, reachable only from
+    # other compose services on the internal network.
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
+    restart: unless-stopped
+    environment:
+      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__COMPUTE_TYPE: int8
+    volumes:
+      # Model cache on the /data array, not the root disk — same
+      # convention as postgres's relocated data.
+      - /data/docker/nerve/stt-hf-cache:/home/ubuntu/.cache/huggingface/hub
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
