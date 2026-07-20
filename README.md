@@ -1,7 +1,8 @@
 # Nerve
 
 See `docs/nerve-system-spec-v1.0.md` and `CLAUDE.md` for the full contract.
-This file covers M1 (run record schema) and M2 (intake + router CLI).
+This file covers M1 (run record schema), M2 (intake + router CLI), and M3
+(Artifact/Skill outcome dispatch via Temporal).
 
 ## 1. Configure secrets
 
@@ -19,9 +20,12 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Brings up `postgres` (`pgvector/pgvector:pg16`, bound to `127.0.0.1:5432`)
-and `litellm` (bound to `127.0.0.1:4000`, fronting Anthropic per spec
-Section 9 — economy/workhorse/flagship tiers).
+Brings up `postgres` (`pgvector/pgvector:pg16`, bound to `127.0.0.1:5432`,
+data on the `/data` array — not the root disk), `litellm` (bound to
+`127.0.0.1:4000`, fronting Anthropic per spec Section 9 —
+economy/workhorse/flagship tiers), `temporal` (bound to `127.0.0.1:7233`,
+schema auto-applied against the same postgres instance), and `worker`
+(the M3 Temporal worker — no exposed port).
 
 ## 3. Apply migrations
 
@@ -62,9 +66,10 @@ docker compose exec postgres psql -U nerve_app -d nerve -c \
 ```
 
 Creates the `litellm` database (its own virtual-key store, separate from
-the `nerve` schema), waits for the service to be healthy, and mints two
-virtual keys — `normalizer` and `router` — into `.env` so LiteLLM attributes
-spend per component from the first call. Idempotent.
+the `nerve` schema), waits for the service to be healthy, and mints one
+virtual key per component — `normalizer`, `router` (M2), `artifact`,
+`skill` (M3) — into `.env` so LiteLLM attributes spend per component from
+the first call. Idempotent.
 
 ## 6. Install intake dependencies
 
@@ -99,3 +104,46 @@ a duplicate), then read back `runs`:
 docker compose exec postgres psql -U nerve_app -d nerve -c \
   "SELECT id, created_at, outcome, confirmed_overridden, route_confidence FROM runs ORDER BY created_at;"
 ```
+
+## 8. Dispatch Artifact/Skill outcomes (M3)
+
+When a confirmed or overridden route is `artifact` or `skill`,
+`submit-task.sh` starts the matching Temporal workflow (task queue
+`nerve-outcomes`, run by the `worker` service) and waits for it to
+complete before writing the run record. Every other outcome — including
+`aborted` — is unchanged from M2: no dispatch.
+
+- **Artifact** (`intake/workflows/artifactWorkflow.js`): "direct execution
+  session — produce the deliverable now" (spec Section 5). Whole job for
+  a one-off deliverable.
+- **Skill** (`intake/workflows/skillWorkflow.js`): "skill-authoring
+  workflow — draft contract: inputs, outputs, single responsibility"
+  (spec Section 5). Drafts the skill contract only — full authoring,
+  testing, and registration mature later (Section 5's bottom-up order).
+
+Both run on the workhorse LiteLLM tier ("building" per Section 9), with
+their own bounded retry (3 attempts, 30s each, summed cost/tokens across
+attempts — not just the last) independent of Temporal's own retry layer.
+
+The deliverable's content is written to `./output/<outcome>/<run_id>.md`
+— never into the run record, which stores only a pointer (`output_ref`)
+plus metadata (`workflow_id`, `workflow_version`, `status`, `duration_ms`,
+`cost_usd`, `tokens`, `outcome_shipped`). `outcome_shipped` for M3 is a
+flagged simplification: true iff the workflow completed without error and
+produced non-empty output — no real goal-verification step exists yet.
+
+### M3 definition of done
+
+Submit one task that routes to `artifact` and one that routes to `skill`
+(confirming each), then:
+
+```
+docker compose exec postgres psql -U nerve_app -d nerve -x -c \
+  "SELECT id, outcome, status, workflow_id, workflow_version, duration_ms, cost_usd, tokens, outcome_shipped, output_ref FROM runs WHERE outcome IN ('artifact','skill') ORDER BY created_at DESC LIMIT 2;"
+cat output/artifact/<run_id>.md
+cat output/skill/<run_id>.md
+```
+
+Both rows show populated `execution`/`measures`/`output_ref`; both files
+exist on disk; spend is visible on the `artifact`/`skill` virtual keys in
+LiteLLM.
