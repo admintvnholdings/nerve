@@ -2,19 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nerve — v0</title>
 <style>
+  /* Same page for every device (spec Section 4.1) — differences here are
+     layout only: viewport handling, touch-sized controls, a scrollable
+     table wrapper. No new functionality rides along. */
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
   h1 { font-size: 1.3rem; }
   h2 { font-size: 1rem; margin-top: 2rem; color: #444; }
-  textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.5rem; }
-  button { font: inherit; padding: 0.4rem 0.9rem; margin-right: 0.5rem; cursor: pointer; }
+  textarea { width: 100%; font: inherit; padding: 0.5rem; }
+  button { font: inherit; padding: 0.6rem 1rem; margin: 0.25rem 0.5rem 0.25rem 0; cursor: pointer; }
   pre { background: #f4f4f4; padding: 0.75rem; overflow-x: auto; font-size: 0.85rem; }
   #panel { border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin-top: 1rem; min-height: 2rem; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 0.85rem; }
   th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
   .muted { color: #888; }
-  input[type=text] { font: inherit; padding: 0.3rem; }
+  input[type=text] { font: inherit; padding: 0.5rem; width: 100%; max-width: 320px; }
+  @media (max-width: 480px) {
+    body { margin: 1rem auto; }
+    input[type=text] { max-width: 100%; display: block; margin: 0.4rem 0; }
+    button { width: 100%; margin: 0.25rem 0; }
+  }
 </style>
 </head>
 <body>
@@ -28,12 +39,14 @@
   <div id="panel"><span class="muted">Nothing submitted yet.</span></div>
 
   <h2>Run history <button id="refresh-runs" type="button">Refresh</button></h2>
-  <table id="runs-table">
-    <thead>
-      <tr><th>Time</th><th>Source</th><th>Outcome</th><th>Confirmed/Overridden</th><th>Status</th><th>Cost</th><th>Tokens</th><th>Output</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-scroll">
+    <table id="runs-table">
+      <thead>
+        <tr><th>Time</th><th>Source</th><th>Outcome</th><th>Confirmed/Overridden</th><th>Status</th><th>Cost</th><th>Tokens</th><th>Output</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
 <script>
 const panel = document.getElementById('panel');
