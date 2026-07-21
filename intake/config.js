@@ -102,4 +102,9 @@ export const CONFIG = {
   // an outcome having zero occurrences means little until the corpus is
   // large enough that "hasn't come up yet" becomes an unlikely explanation.
   evaluatorDeadBranchCorpusMinN: 20,
+  // Spec Section 11's M7 DoD: "first scheduled review over >=30 real
+  // runs." Distinct from evaluatorDeadBranchCorpusMinN (20) — this is
+  // the milestone's own bar, tracked and stated explicitly rather than
+  // silently implied by the per-check gates.
+  evaluatorMinRunsForFirstReview: 30,
 };

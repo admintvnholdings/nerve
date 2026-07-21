@@ -255,8 +255,34 @@ function calibrationFindings(runs) {
   }];
 }
 
+// Always emitted, stated explicitly rather than left implicit in the
+// per-check gates: spec Section 11's M7 DoD calls for >=30 real runs
+// before the first scheduled review. This cycle may run under that bar
+// on the owner's explicit instruction — the shortfall is recorded, not
+// silently absorbed.
+function corpusSizeObservation(runs) {
+  const gate = CONFIG.evaluatorMinRunsForFirstReview;
+  const n = runs.length;
+  const met = n >= gate;
+  return {
+    kind: 'observation',
+    category: null,
+    targetArtifact: 'evaluator.corpusSize',
+    currentValue: `${n} runs`,
+    proposedValue: null,
+    evidenceRunIds: runs.map((r) => r.id),
+    n,
+    gateThreshold: gate,
+    evidenceStrength: met ? 'adequate' : 'below_gate',
+    rationale: met
+      ? `Corpus has ${n} runs, meeting spec Section 11's M7 DoD bar of >=${gate} real runs.`
+      : `Corpus has ${n} runs, below spec Section 11's M7 DoD bar of >=${gate} real runs (short by ${gate - n}). This cycle proceeds anyway on explicit owner instruction — per-check gates below still apply independently and may still produce findings.`,
+  };
+}
+
 export function analyzeRuns(runs) {
   return [
+    corpusSizeObservation(runs),
     residueGapFinding(),
     ...deadBranchFindings(runs),
     ...frictionFindings(runs),
