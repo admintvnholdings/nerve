@@ -3,7 +3,8 @@
 See `docs/nerve-system-spec-v1.0.md` and `CLAUDE.md` for the full contract.
 This file covers M1 (run record schema), M2 (intake + router CLI), M3
 (Artifact/Skill outcome dispatch via Temporal), M4 (desktop app v0), M5
-(mesh + mobile access), and M6 (voice intake).
+(mesh + mobile access), M6 (voice intake), and M7 (evaluator + approval
+queue).
 
 ## 1. Configure secrets
 
@@ -337,4 +338,46 @@ route. Then:
 ```
 docker compose exec postgres psql -U nerve_app -d nerve -c \
   "SELECT id, created_at, source_device, raw_input, outcome, confirmed_overridden FROM runs ORDER BY created_at DESC LIMIT 3;"
+```
+
+## 12. Evaluator + approval queue (M7)
+
+```
+./scripts/arm-evaluator-schedule.sh   # idempotent — arms the weekly cycle (Monday 03:00 UTC)
+./scripts/run-evaluator.sh            # manual trigger — same workflow, on demand
+```
+
+Reads the run log only (never the knowledge store, never live
+workflows — spec Section 7). Every actionable number is code-computed
+(`intake/evaluator/analyze.js`); the flagship-tier LLM
+(`LITELLM_EVALUATOR_KEY`) only writes a narrative summary over those
+numbers, so nothing actionable can be a hallucinated statistic. Checks:
+dead branches, friction/abort rate, per-outcome override rate,
+per-outcome cost outliers, confidence calibration — each gated on a
+minimum sample size; below gate, a check produces an **observation**
+(informational), not a **finding** (actionable). The residue-
+instrumentation gap (Section 7 requires residue analysis; the router
+never logs it) is always emitted as its own structural finding rather
+than faked or buried.
+
+Findings land in the "Approval queue" section of the same web app —
+approve/reject, both requiring a reason, both permanently logged
+(`evaluator_finding_transitions`, append-only — a finding's status is
+mutable, but how it got there never is).
+
+**Auto-apply is structurally inert at v0** — `evaluatorAutoApplyEnabled:
+false` and `evaluatorAutoApplyCap: 0`, both need to change (by
+changelog, spec Section 7) before anything auto-applies; the code
+throws rather than fake an `auto_applied` status if that gate is ever
+reached without a real apply mechanism behind it.
+
+### M7 definition of done
+
+≥30 real runs, one manually-triggered evaluator cycle, findings visible
+in the approval queue with evidence run ids / n / gate, at least one
+approved and one rejected with recorded reasons:
+
+```
+docker compose exec postgres psql -U nerve_app -d nerve -c \
+  "SELECT target_artifact, category, n, gate_threshold, evidence_strength, status, decision_reason FROM evaluator_findings WHERE kind = 'finding' ORDER BY target_artifact;"
 ```
